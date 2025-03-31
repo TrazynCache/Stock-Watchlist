@@ -1,0 +1,46 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Stock Watchlist</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <h1>Stock Watchlist</h1>
+    <!-- Display flash messages -->
+    {% with messages = get_flashed_messages() %}
+    {% if messages %}
+    <div style="color: red;">
+        {% for message in messages %}
+        <p>{{ message }}</p>
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% endwith %}
+    <form method="POST">
+        <input type="text" name="symbol" placeholder="Stock Symbol (e.g., AAPL)" required>
+        <input type="number" name="target_price" placeholder="Target Price" step="0.01" required>
+        <button type="submit">Add Stock</button>
+    </form>
+    <h2>Your Stocks</h2>
+    <table>
+        <tr>
+            <th>Symbol</th>
+            <th>Target Price</th>
+            <th>Current Price</th>
+            <th>Last Updated</th>
+            <th>Trend</th>
+        </tr>
+        {% for stock in stocks %}
+        <tr>
+            <td>{{ stock.symbol }}</td>
+            <td>{{ stock.target_price }}</td>
+            <td>{{ stock.current_price }}</td>
+            <td>{{ stock.last_updated }}</td>
+            <td class="{{ stock.trend }}">{{ stock.trend }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    <a href="{{ url_for('alerts') }}">View Alerts</a>
+</body>
+</html>

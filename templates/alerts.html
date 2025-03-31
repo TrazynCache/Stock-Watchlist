@@ -1,0 +1,32 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Price Alerts</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <h1>Price Alerts</h1>
+    {% if alerts %}
+    <table>
+        <tr>
+            <th>Symbol</th>
+            <th>Target Price</th>
+            <th>Current Price</th>
+            <th>Last Updated</th>
+        </tr>
+        {% for alert in alerts %}
+        <tr>
+            <td>{{ alert.symbol }}</td>
+            <td>{{ alert.target_price }}</td>
+            <td>{{ alert.current_price }}</td>
+            <td>{{ alert.last_updated }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% else %}
+    <p>No alerts triggered yet.</p>
+    {% endif %}
+    <a href="{{ url_for('index') }}">Back to Watchlist</a>
+</body>
+</html>
