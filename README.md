@@ -8,6 +8,7 @@ Example of a stock watchlist page with AMD and NVDA included
 
 ### Alerts Page
 No alerts
+
 ![Alerts Page](screenshots/alerts.png)
 
 Example of an alert page with AMD stock
