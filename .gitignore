@@ -316,6 +316,9 @@ paket-files/
 __pycache__/
 *.pyc
 
+# Ignore the data folder (for stocks.csv)
+data/
+
 # Cake - Uncomment if you are using it
 # tools/**
 # !tools/packages.config
