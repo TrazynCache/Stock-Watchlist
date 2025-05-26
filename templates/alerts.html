@@ -1,32 +1,301 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Price Alerts</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alert Management - Stock Watchlist</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
 </head>
 <body>
-    <h1>Price Alerts</h1>
-    {% if alerts %}
-    <table>
-        <tr>
-            <th>Symbol</th>
-            <th>Target Price</th>
-            <th>Current Price</th>
-            <th>Last Updated</th>
-        </tr>
-        {% for alert in alerts %}
-        <tr>
-            <td>{{ alert.symbol }}</td>
-            <td>{{ alert.target_price }}</td>
-            <td>{{ alert.current_price }}</td>
-            <td>{{ alert.last_updated }}</td>
-        </tr>
-        {% endfor %}
-    </table>
-    {% else %}
-    <p>No alerts triggered yet.</p>
-    {% endif %}
-    <a href="{{ url_for('index') }}">Back to Watchlist</a>
+    <div class="container">
+        <header class="header">
+            <h1><i class="fas fa-bell"></i> Alert Management</h1>
+            <div class="header-controls">
+                <a href="{{ url_for('index') }}" class="btn btn-secondary">
+                    <i class="fas fa-arrow-left"></i> Back to Dashboard
+                </a>
+                <button id="test-alerts-btn" class="btn btn-info">
+                    <i class="fas fa-vial"></i> Test Alerts
+                </button>
+            </div>
+        </header>
+
+        <!-- Flash Messages -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        <div id="flash-messages">
+            {% for category, message in messages %}
+            <div class="alert alert-{{ 'danger' if category == 'error' else 'success' }}">
+                <span>{{ message }}</span>
+                <button type="button" class="alert-close" onclick="this.parentElement.remove()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
+
+        <!-- Create Alert Form -->
+        <div class="create-alert-section">
+            <h2><i class="fas fa-plus-circle"></i> Create New Alert</h2>
+            <form method="POST" action="{{ url_for('add_alert') }}" class="alert-form">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="symbol">Stock Symbol</label>
+                        <input type="text" name="symbol" id="symbol" placeholder="e.g., AAPL" 
+                               class="form-input" required autocomplete="off">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="alert_type">Alert Type</label>
+                        <select name="alert_type" id="alert_type" class="form-input" required>
+                            {% for alert_type in alert_types %}
+                            <option value="{{ alert_type }}">
+                                {% if alert_type == 'price_above' %}Price Above Threshold
+                                {% elif alert_type == 'price_below' %}Price Below Threshold
+                                {% elif alert_type == 'percentage_change' %}Percentage Change
+                                {% elif alert_type == 'volume_spike' %}Volume Spike
+                                {% elif alert_type == 'rsi_oversold' %}RSI Oversold
+                                {% elif alert_type == 'rsi_overbought' %}RSI Overbought
+                                {% else %}{{ alert_type.title() }}
+                                {% endif %}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="threshold">Threshold</label>
+                        <input type="number" name="threshold" id="threshold" step="0.01" 
+                               placeholder="e.g., 150.00" class="form-input" required>
+                        <small class="form-help" id="threshold-help">Enter the trigger value</small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="message">Custom Message (Optional)</label>
+                        <input type="text" name="message" id="message" 
+                               placeholder="Custom alert message" class="form-input">
+                    </div>
+                </div>
+                
+                <div class="form-options">
+                    <div class="checkbox-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="notification_enabled" checked>
+                            <span class="checkbox-custom"></span>
+                            <i class="fas fa-desktop"></i> Browser Notifications
+                        </label>
+                    </div>
+                    
+                    <div class="checkbox-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="sound_enabled" checked>
+                            <span class="checkbox-custom"></span>
+                            <i class="fas fa-volume-up"></i> Sound Alerts
+                        </label>
+                    </div>
+                </div>
+                
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-bell"></i> Create Alert
+                </button>
+            </form>
+        </div>
+
+        <!-- Active Alerts -->
+        <div class="alerts-section">
+            <h2><i class="fas fa-clock"></i> Active Alerts ({{ active_alerts|length }})</h2>
+            {% if active_alerts %}
+            <div class="table-container">
+                <table class="alerts-table">
+                    <thead>
+                        <tr>
+                            <th>Stock</th>
+                            <th>Alert Type</th>
+                            <th>Threshold</th>
+                            <th>Created</th>
+                            <th>Notifications</th>
+                            <th>Sound</th>
+                            <th>Message</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for alert in active_alerts %}
+                        <tr class="alert-row">
+                            <td class="symbol-cell">
+                                <strong>{{ alert.symbol }}</strong>
+                            </td>
+                            <td class="alert-type-cell">
+                                <span class="alert-type-badge alert-type-{{ alert.alert_type.value }}">
+                                    {% if alert.alert_type.value == 'price_above' %}
+                                        <i class="fas fa-arrow-up"></i> Price Above
+                                    {% elif alert.alert_type.value == 'price_below' %}
+                                        <i class="fas fa-arrow-down"></i> Price Below
+                                    {% elif alert.alert_type.value == 'percentage_change' %}
+                                        <i class="fas fa-percentage"></i> % Change
+                                    {% elif alert.alert_type.value == 'volume_spike' %}
+                                        <i class="fas fa-chart-bar"></i> Volume Spike
+                                    {% else %}
+                                        {{ alert.alert_type.value.title() }}
+                                    {% endif %}
+                                </span>
+                            </td>
+                            <td class="threshold-cell">
+                                {% if alert.alert_type.value in ['price_above', 'price_below'] %}
+                                    ${{ "%.2f"|format(alert.threshold) }}
+                                {% elif alert.alert_type.value == 'percentage_change' %}
+                                    {{ "%.2f"|format(alert.threshold) }}%
+                                {% else %}
+                                    {{ alert.threshold }}
+                                {% endif %}
+                            </td>
+                            <td class="created-cell">{{ alert.created_at }}</td>
+                            <td class="notification-cell">
+                                <i class="fas fa-{{ 'check' if alert.notification_enabled else 'times' }} 
+                                   {{ 'text-success' if alert.notification_enabled else 'text-danger' }}"></i>
+                            </td>
+                            <td class="sound-cell">
+                                <i class="fas fa-{{ 'volume-up' if alert.sound_enabled else 'volume-mute' }} 
+                                   {{ 'text-success' if alert.sound_enabled else 'text-muted' }}"></i>
+                            </td>
+                            <td class="message-cell">{{ alert.message or 'Default message' }}</td>
+                            <td class="actions-cell">
+                                <form method="POST" action="{{ url_for('disable_alert', alert_id=alert.id) }}" 
+                                      style="display: inline;" onsubmit="return confirm('Disable this alert?')">
+                                    <button type="submit" class="btn btn-sm btn-warning">
+                                        <i class="fas fa-pause"></i> Disable
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <i class="fas fa-bell-slash"></i>
+                <h3>No Active Alerts</h3>
+                <p>Create your first alert to get notified when stock prices reach your target levels!</p>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Triggered Alerts -->
+        <div class="triggered-alerts-section">
+            <h2><i class="fas fa-history"></i> Recently Triggered Alerts ({{ triggered_alerts|length }})</h2>
+            {% if triggered_alerts %}
+            <div class="table-container">
+                <table class="alerts-table">
+                    <thead>
+                        <tr>
+                            <th>Stock</th>
+                            <th>Alert Type</th>
+                            <th>Threshold</th>
+                            <th>Triggered At</th>
+                            <th>Message</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for alert in triggered_alerts %}
+                        <tr class="triggered-alert-row">
+                            <td class="symbol-cell">
+                                <strong>{{ alert.symbol }}</strong>
+                            </td>
+                            <td class="alert-type-cell">
+                                <span class="alert-type-badge alert-type-{{ alert.alert_type.value }} triggered">
+                                    {% if alert.alert_type.value == 'price_above' %}
+                                        <i class="fas fa-arrow-up"></i> Price Above
+                                    {% elif alert.alert_type.value == 'price_below' %}
+                                        <i class="fas fa-arrow-down"></i> Price Below
+                                    {% elif alert.alert_type.value == 'percentage_change' %}
+                                        <i class="fas fa-percentage"></i> % Change
+                                    {% elif alert.alert_type.value == 'volume_spike' %}
+                                        <i class="fas fa-chart-bar"></i> Volume Spike
+                                    {% else %}
+                                        {{ alert.alert_type.value.title() }}
+                                    {% endif %}
+                                </span>
+                            </td>
+                            <td class="threshold-cell">
+                                {% if alert.alert_type.value in ['price_above', 'price_below'] %}
+                                    ${{ "%.2f"|format(alert.threshold) }}
+                                {% elif alert.alert_type.value == 'percentage_change' %}
+                                    {{ "%.2f"|format(alert.threshold) }}%
+                                {% else %}
+                                    {{ alert.threshold }}
+                                {% endif %}
+                            </td>
+                            <td class="triggered-cell">
+                                <strong>{{ alert.triggered_at }}</strong>
+                            </td>
+                            <td class="message-cell">{{ alert.message }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <i class="fas fa-clock"></i>
+                <h3>No Triggered Alerts</h3>
+                <p>Your triggered alerts will appear here when your alert conditions are met.</p>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Alert Settings -->
+        <div class="alert-settings-section">
+            <h2><i class="fas fa-cog"></i> Alert Settings</h2>
+            <div class="settings-grid">
+                <div class="setting-card">
+                    <div class="setting-header">
+                        <i class="fas fa-desktop"></i>
+                        <h3>Browser Notifications</h3>
+                    </div>
+                    <p>Enable browser notifications to receive alerts even when the page is in the background.</p>
+                    <button id="enable-notifications-btn" class="btn btn-primary">
+                        <i class="fas fa-bell"></i> Enable Notifications
+                    </button>
+                    <div id="notification-status" class="status-text"></div>
+                </div>
+                
+                <div class="setting-card">
+                    <div class="setting-header">
+                        <i class="fas fa-volume-up"></i>
+                        <h3>Sound Alerts</h3>
+                    </div>
+                    <p>Test your sound alerts to make sure they're working properly.</p>
+                    <button id="test-sound-btn" class="btn btn-info">
+                        <i class="fas fa-play"></i> Test Sound
+                    </button>
+                </div>
+                
+                <div class="setting-card">
+                    <div class="setting-header">
+                        <i class="fas fa-sync-alt"></i>
+                        <h3>Update Frequency</h3>
+                    </div>
+                    <p>Alerts are checked every 30 seconds. Price updates occur every minute.</p>
+                    <div class="frequency-info">
+                        <span class="frequency-label">Alert Check:</span> 30s
+                        <span class="frequency-label">Price Update:</span> 60s
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Audio for alerts -->
+    <audio id="alert-sound" preload="auto">
+        <source src="{{ url_for('static', filename='alert.mp3') }}" type="audio/mpeg">
+        <source src="{{ url_for('static', filename='alert.wav') }}" type="audio/wav">
+    </audio>
+
+    <script src="{{ url_for('static', filename='alerts.js') }}"></script>
 </body>
 </html>

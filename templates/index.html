@@ -1,46 +1,213 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Stock Watchlist</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Stock Watchlist</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
-    <h1>Stock Watchlist</h1>
-    <!-- Display flash messages -->
-    {% with messages = get_flashed_messages() %}
-    {% if messages %}
-    <div style="color: red;">
-        {% for message in messages %}
-        <p>{{ message }}</p>
-        {% endfor %}
+    <div class="container">
+        <header class="header">
+            <h1><i class="fas fa-chart-line"></i> Advanced Stock Watchlist</h1>
+            <div class="header-controls">
+                <span id="connection-status" class="status-indicator">
+                    <i class="fas fa-circle"></i> Connecting...
+                </span>
+                <button id="refresh-btn" class="btn btn-secondary">
+                    <i class="fas fa-sync-alt"></i> Refresh
+                </button>
+                <a href="{{ url_for('alerts') }}" class="btn btn-primary">
+                    <i class="fas fa-bell"></i> Manage Alerts
+                </a>
+            </div>
+        </header>
+
+        <!-- Flash Messages -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        <div id="flash-messages">
+            {% for category, message in messages %}
+            <div class="alert alert-{{ 'danger' if category == 'error' else 'success' }}">
+                <span>{{ message }}</span>
+                <button type="button" class="alert-close" onclick="this.parentElement.remove()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
+
+        <!-- Add Stock Form -->
+        <div class="add-stock-section">
+            <h2><i class="fas fa-plus-circle"></i> Add Stock to Watchlist</h2>
+            <form method="POST" action="{{ url_for('add_stock') }}" class="add-stock-form">
+                <div class="form-group">
+                    <input type="text" name="symbol" placeholder="Enter stock symbol (e.g., AAPL, MSFT, GOOGL)" 
+                           class="form-input" required autocomplete="off" id="stock-symbol-input">
+                    <div id="search-suggestions" class="search-suggestions"></div>
+                </div>
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-plus"></i> Add Stock
+                </button>
+            </form>
+        </div>
+
+        <!-- Market Summary -->
+        <div class="market-summary">
+            <h2><i class="fas fa-chart-bar"></i> Market Summary</h2>
+            <div class="summary-cards">
+                <div class="summary-card">
+                    <div class="card-header">
+                        <i class="fas fa-list"></i> Total Stocks
+                    </div>
+                    <div class="card-value" id="total-stocks">{{ stocks|length }}</div>
+                </div>
+                <div class="summary-card">
+                    <div class="card-header">
+                        <i class="fas fa-bell"></i> Active Alerts
+                    </div>
+                    <div class="card-value" id="active-alerts">{{ active_alerts|length }}</div>
+                </div>
+                <div class="summary-card">
+                    <div class="card-header">
+                        <i class="fas fa-arrow-up"></i> Gainers
+                    </div>
+                    <div class="card-value" id="gainers-count">
+                        {{ stocks|selectattr('day_change', 'greaterthan', 0)|list|length }}
+                    </div>
+                </div>
+                <div class="summary-card">
+                    <div class="card-header">
+                        <i class="fas fa-arrow-down"></i> Losers
+                    </div>
+                    <div class="card-value" id="losers-count">
+                        {{ stocks|selectattr('day_change', 'lessthan', 0)|list|length }}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stocks Table -->
+        <div class="stocks-section">
+            <h2><i class="fas fa-table"></i> Your Watchlist</h2>
+            {% if stocks %}
+            <div class="table-container">
+                <table class="stocks-table" id="stocks-table">
+                    <thead>
+                        <tr>
+                            <th>Symbol</th>
+                            <th>Company</th>
+                            <th>Price</th>
+                            <th>Change</th>
+                            <th>Change %</th>
+                            <th>Volume</th>
+                            <th>Market Cap</th>
+                            <th>P/E Ratio</th>
+                            <th>52W High</th>
+                            <th>52W Low</th>
+                            <th>Last Updated</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="stocks-tbody">
+                        {% for stock in stocks %}
+                        <tr data-symbol="{{ stock.symbol }}" class="stock-row">
+                            <td class="symbol-cell">
+                                <strong>{{ stock.symbol }}</strong>
+                                <small class="exchange">{{ stock.exchange }}</small>
+                            </td>
+                            <td class="company-name">{{ stock.company_name or stock.symbol }}</td>
+                            <td class="price-cell">
+                                ${{ "%.2f"|format(stock.current_price) }}
+                            </td>
+                            <td class="change-cell {{ 'positive' if stock.day_change > 0 else 'negative' if stock.day_change < 0 else 'neutral' }}">
+                                <i class="fas fa-{{ 'arrow-up' if stock.day_change > 0 else 'arrow-down' if stock.day_change < 0 else 'minus' }}"></i>
+                                ${{ "%.2f"|format(stock.day_change) }}
+                            </td>
+                            <td class="change-percent-cell {{ 'positive' if stock.day_change_percent > 0 else 'negative' if stock.day_change_percent < 0 else 'neutral' }}">
+                                {{ "%.2f"|format(stock.day_change_percent) }}%
+                            </td>
+                            <td class="volume-cell">{{ "{:,}".format(stock.volume) }}</td>
+                            <td class="market-cap-cell">
+                                {% if stock.market_cap %}
+                                    ${{ "%.2fB"|format(stock.market_cap / 1e9) if stock.market_cap > 1e9 else "%.2fM"|format(stock.market_cap / 1e6) }}
+                                {% else %}
+                                    N/A
+                                {% endif %}
+                            </td>
+                            <td class="pe-ratio-cell">
+                                {{ "%.2f"|format(stock.pe_ratio) if stock.pe_ratio else 'N/A' }}
+                            </td>
+                            <td class="high-52w-cell">
+                                {% if stock.week_52_high %}
+                                    ${{ "%.2f"|format(stock.week_52_high) }}
+                                {% else %}
+                                    N/A
+                                {% endif %}
+                            </td>
+                            <td class="low-52w-cell">
+                                {% if stock.week_52_low %}
+                                    ${{ "%.2f"|format(stock.week_52_low) }}
+                                {% else %}
+                                    N/A
+                                {% endif %}
+                            </td>
+                            <td class="last-updated-cell">{{ stock.last_updated }}</td>
+                            <td class="actions-cell">
+                                <button class="btn btn-sm btn-info" onclick="showStockChart('{{ stock.symbol }}')">
+                                    <i class="fas fa-chart-line"></i> Chart
+                                </button>
+                                <form method="POST" action="{{ url_for('remove_stock', symbol=stock.symbol) }}" 
+                                      style="display: inline;" onsubmit="return confirm('Remove {{ stock.symbol }} from watchlist?')">
+                                    <button type="submit" class="btn btn-sm btn-danger">
+                                        <i class="fas fa-trash"></i> Remove
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <i class="fas fa-inbox"></i>
+                <h3>No stocks in your watchlist</h3>
+                <p>Add some stocks to get started with tracking their prices!</p>
+            </div>
+            {% endif %}
+        </div>
     </div>
-    {% endif %}
-    {% endwith %}
-    <form method="POST">
-        <input type="text" name="symbol" placeholder="Stock Symbol (e.g., AAPL)" required>
-        <input type="number" name="target_price" placeholder="Target Price" step="0.01" required>
-        <button type="submit">Add Stock</button>
-    </form>
-    <h2>Your Stocks</h2>
-    <table>
-        <tr>
-            <th>Symbol</th>
-            <th>Target Price</th>
-            <th>Current Price</th>
-            <th>Last Updated</th>
-            <th>Trend</th>
-        </tr>
-        {% for stock in stocks %}
-        <tr>
-            <td>{{ stock.symbol }}</td>
-            <td>{{ stock.target_price }}</td>
-            <td>{{ stock.current_price }}</td>
-            <td>{{ stock.last_updated }}</td>
-            <td class="{{ stock.trend }}">{{ stock.trend }}</td>
-        </tr>
-        {% endfor %}
-    </table>
-    <a href="{{ url_for('alerts') }}">View Alerts</a>
+
+    <!-- Stock Chart Modal -->
+    <div id="chart-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="chart-title">Stock Chart</h3>
+                <button class="modal-close" onclick="closeChartModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <canvas id="stock-chart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Container -->
+    <div id="notification-container"></div>
+
+    <!-- Audio for alerts -->
+    <audio id="alert-sound" preload="auto">
+        <source src="{{ url_for('static', filename='alert.mp3') }}" type="audio/mpeg">
+        <source src="{{ url_for('static', filename='alert.wav') }}" type="audio/wav">
+    </audio>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>
